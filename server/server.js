@@ -171,7 +171,7 @@ process.on("SIGINT", function() {
 
 /*
  * ------------------------------------------------
- * Routes
+ * ACL
  */
 
 var nodeAcl = new acl(new acl.mongodbBackend(mongoose.connection.db));
