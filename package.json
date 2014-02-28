@@ -1,0 +1,30 @@
+{
+	"name": "express-mongoose-acl",
+	"description": "Express Mongoose ACL",
+	"version": "0.0.1",
+	"repository": {
+		"type": "git",
+		"url": "git@github.com:chasevida/express-mongoose-acl.git"
+	},
+	"engines": {
+		"node": "0.10.x"
+	},
+    "main": "server/server.js",
+	"dependencies": {
+        "acl": "0.2.6",
+		"express": "3.4.8",
+		"jade": "1.2.0",
+        "mongodb": "1.3.23",
+		"mongoose": "3.8.8"
+
+	},
+    "devDependencies": {
+        "grunt": "~0.4.x",
+        "grunt-concurrent": "~0.4.2",
+        "grunt-contrib-watch": "~0.5.3",
+        "grunt-nodemon": "~0.1.2"
+    },
+    "scripts": {
+        "start": "node server/server.js"
+    }
+}
