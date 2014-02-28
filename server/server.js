@@ -92,7 +92,7 @@ var saveCallback = function(err, user) {
     }
 };
 
-var publicUser = new User({
+var guestUser = new User({
     username:   "public",
     email:      "public@something.com",
     password:   "publicpassword",
@@ -114,20 +114,24 @@ var adminUser = new User({
 });
 
 
-publicUser.save(saveCallback);
+guestUser.save(saveCallback);
 userUser.save(saveCallback);
 adminUser.save(saveCallback);
 
-var selectedUser = publicUser;
+// assign a user for the purposes of testing
+var selectedUser = guestUser;
 
 /*
  * ------------------------------------------------
  * Routes
  */
 var route = function(req, res) {
-    req.session.user = selectedUser;
+    var userId = req.session.user ? req.session.user._id : null;
     var username = req.session.user ? req.session.user.username : "";
     var roles = req.session.user ? req.session.user.roles : "";
+
+    req.session.userId = userId; // do i need this?
+    req.session.user = selectedUser;
     res.json({
         route: req.route.path,
         verb: req.method,
@@ -152,6 +156,18 @@ app.delete('/users', route);
 
 
 
+/*
+ * ------------------------------------------------
+ * ACL
+ */
+
+var nodeAcl = new acl(new acl.mongodbBackend(mongoose.connection.db));
+
+app.use( nodeAcl.middleware );
+
+//nodeAcl.allow('guest', ['books'], ['get', 'post']); // throws error
+//nodeAcl.allow('admin', ['books', 'users'], '*'); // throws error
+
 
 /*
  * ------------------------------------------------
@@ -169,9 +185,4 @@ process.on("SIGINT", function() {
 });
 
 
-/*
- * ------------------------------------------------
- * ACL
- */
 
-var nodeAcl = new acl(new acl.mongodbBackend(mongoose.connection.db));
