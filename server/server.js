@@ -1,10 +1,15 @@
+const cookieParser = require("cookie-parser");
+const errorHandler = require("errorhandler");
+const methodOverride = require("method-override");
 var express = require("express"),
     http = require("http"),
     path = require("path"),
     mongoose = require("mongoose"),
-    acl = require("acl"),
-    _ = require('lodash'), // lodash is really userful				
-    ;
+    Acl = require("acl"),
+    _ = require('lodash'); // lodash is really useful				
+const session = require("express-session");
+const morgan = require("morgan");
+
 
 
 
@@ -14,8 +19,8 @@ var express = require("express"),
  */
 
 var app = express(),
-    port = process.env.PORT || 3000,
-    dburi = "mongodb://localhost/ExpressMongooseACL";
+    port = process.env.PORT || 8080,
+    dburi = "mongodb://localhost:27017/ExpressMongooseACL";
 
 /*
  * ------------------------------------------------
@@ -24,16 +29,21 @@ var app = express(),
 
 app.set("port", port);
 app.set('views', path.join(__dirname, '../', 'views'));
-app.set('view engine', 'jade');
+app.set('view engine', 'pug');
 
 
-app.use(express.logger('dev'));
+app.use(morgan('dev'));
 app.use(express.json());
-app.use(express.urlencoded());
-app.use(express.methodOverride());
-app.use(express.cookieParser('a very secret key'));
-app.use(express.session());
-app.use(app.router);
+app.use(express.urlencoded({
+    extended: true
+}));
+app.use(methodOverride());
+app.use(cookieParser('a very secret key'));
+app.use(session({
+    saveUninitialized: false,
+    resave: true,
+    secret: "mysupersecret"
+}));
 app.use(express.static(path.join(__dirname, "../", "public")));
 
 /*
@@ -41,7 +51,7 @@ app.use(express.static(path.join(__dirname, "../", "public")));
  * Configure by environment
  */
 if ('development' == app.get('env')) {
-    app.use(express.errorHandler());
+    app.use(errorHandler());
 }
 
 
@@ -52,15 +62,18 @@ if ('development' == app.get('env')) {
 
 mongoose.connect(dburi);
 
-mongoose.connection.on('connected', function() {
+mongoose.connection.on('connected', function () {
     console.log('Mongoose connected to ' + dburi);
 });
 
-mongoose.connection.on('disconnected', function() {
+mongoose.connection.on('disconnected', function () {
     console.log('Mongoose disconnected');
 });
 
-process.on('SIGINT', function() {
+var nodeAcl = new Acl(new Acl.memoryBackend());
+app.use(nodeAcl.middleware());
+
+process.on('SIGINT', function () {
     console.log('Mongoose disconnected through app termination');
     process.exit(0);
 });
@@ -105,7 +118,7 @@ var userPermissions = {
 };
 
 var permissions = [
-    guestPermissions,
+    publicPermissions,
     adminPermissions,
     userPermissions
 ];
@@ -115,20 +128,20 @@ var permissions = [
  * ------------------------------------------------
  * Models
  */
- 
- var bookSchema = new mongoose.Schema({
+
+var bookSchema = new mongoose.Schema({
     name: {
         type: String,
         unique: true
     },
     user: {
         type: mongoose.Schema.Types.ObjectId,
-	ref: 'User'
+        ref: 'User'
     }
 });
 
-bookSchema.post('save', function(book) {
-   acl.allow(book.user._id, '/books/' + book._id, ['*'], function() {});
+bookSchema.post('save', function (book) {
+    nodeAcl.allow(book.user._id, '/books/' + book._id, ['*'], function () { });
 });
 
 mongoose.model('Book', bookSchema);
@@ -153,14 +166,14 @@ var userSchema = new mongoose.Schema({
     }
 });
 
-userSchema.post('save', function(doc) {
+userSchema.post('save', function (doc) {
     var roles = doc.roles;
 
     if (!roles.length) {
         roles = ['user'];
     }
 
-    acl.addUserRoles(doc._id.toString(), roles, function(err) {
+    nodeAcl.addUserRoles(doc._id.toString(), roles, function (err) {
         // if error handle error 
         // otherwise be happy or double check 
     });
@@ -172,12 +185,14 @@ userSchema.post('save', function(doc) {
 mongoose.model('User', userSchema);
 var User = mongoose.model('User');
 
-var saveCallback = function(err, user) {
+var saveCallback = function (err, user) {
     if (!err) {
         console.log("_____________________________________");
         console.log("New User");
         console.log("username:   " + user.username);
         console.log("role:       " + user.roles[0]);
+    } else {
+        console.error(err);
     }
 };
 
@@ -202,13 +217,25 @@ var adminUser = new User({
     roles: ["admin"]
 });
 
+let selectedUser;
 
-guestUser.save(saveCallback);
-userUser.save(saveCallback);
-adminUser.save(saveCallback);
+User.deleteMany({
+    username: {
+        $in: ["user", "admin", "public"]
+    }
+}, (err) => {
+    if (err) {
+        console.error(err);
+    } else {
+        guestUser.save(saveCallback);
+        userUser.save(saveCallback);
+        adminUser.save(saveCallback);
+    }
+})
+
+
 
 // assign a user for the purposes of testing
-var selectedUser = guestUser;
 
 /*
  * Load the default permissions
@@ -219,19 +246,19 @@ function addACO(subject, added) {
     var resource = subject.resource;
     var permissions = subject.permissions;
 
-    acl.allow(role, resource, permissions, added);
+    nodeAcl.allow(role, resource, permissions, added);
 }
 
 function addACL(cb) {
 
-    async.each(permissions, function(aco, next) {
+    async.each(permissions, function (aco, next) {
 
         var role = aco.role;
         var resources = aco.resources;
         var permissions = aco.permissions;
         var children = aco.children || null;
 
-        async.each(resources, function(resource, next) {
+        async.each(resources, function (resource, next) {
 
             var subject = {
                 role: role,
@@ -244,9 +271,9 @@ function addACL(cb) {
 
         }, next);
 
-    }, function(err) {
+    }, function (err) {
 
-        acl.addUserRoles("public", "public", cb);
+        nodeAcl.addUserRoles("public", "public", cb);
 
     });
 
@@ -259,21 +286,21 @@ function addACL(cb) {
 
 var BooksCtrl = {
 
-    list: function(req, res) {res.send(200);},
-    create: function(req, res) {res.send(200);},
-    read: function(req, res) {res.send(200);},
-    update: function(req, res) {res.send(200);},
-    delete: function(req, res) {res.send(200);},
+    list: function (req, res) { res.send(200); },
+    create: function (req, res) { res.send(200); },
+    read: function (req, res) { res.send(200); },
+    update: function (req, res) { res.send(200); },
+    delete: function (req, res) { res.send(200); },
 
 }
 
 var UsersCtrl = {
 
-    list: function(req, res) {res.send(200);},
-    create: function(req, res) {res.send(200);},
-    read: function(req, res) {res.send(200);},
-    update: function(req, res) {res.send(200);},
-    delete: function(req, res) {res.send(200);}
+    list: function (req, res) { User.find((err, users) => res.json(users)); },
+    create: function (req, res) { res.send(200); },
+    read: function (req, res) { res.send(200); },
+    update: function (req, res) { res.send(200); },
+    delete: function (req, res) { res.send(200); }
 
 }
 
@@ -285,31 +312,34 @@ var UsersCtrl = {
  */
 
 function toACLDefinition(subject) {
-	var urlParts = subject.split('/');
-	
-	var index = 1;
-	var corrected = _.map(urlParts, function(part) { // this is a underscore.js/lodash.js method. You may want to include this in your project.
-	
-	
-	    if (part.match(/[0-9a-fA-F]{24}/)) { // if there is an unexpected parameterized route, create a default parameter to check
-	        var param = ':param' + index;
-	        index++;
-	        return param;
-	    } else if (part == ':id([0-9a-fA-F]{24}$)?') { // special case for node-restful routes - node resful routes must be defined as /api/model/:id
-	        return ":id";
-	    } else if (part.trim() == '') {} else {
-	        return part;
-	    }
-	
-	});
-	
-	return corrected.join("/");
-};
-    
-var route = function(req, res, next) {
-    var userId = req.session.user ? req.session.user._id : null;
+    var urlParts = subject.split('/');
 
-    var userId = req.session.user._id || 'public';
+    var index = 1;
+    var corrected = _.map(urlParts, function (part) { // this is a underscore.js/lodash.js method. You may want to include this in your project.
+
+
+        if (part.match(/[0-9a-fA-F]{24}/)) { // if there is an unexpected parameterized route, create a default parameter to check
+            var param = ':param' + index;
+            index++;
+            return param;
+        } else if (part == ':id([0-9a-fA-F]{24}$)?') { // special case for node-restful routes - node resful routes must be defined as /api/model/:id
+            return ":id";
+        } else if (part.trim() == '') { } else {
+            return part;
+        }
+
+    });
+
+    return corrected.join("/");
+};
+
+var route = function (req, res, next) {
+
+    console.log("EHRE");
+
+    // var userId = req.session.user ? req.session.user._id : null;
+
+    // var userId = req.session.user._id || 'public';
 
     var route = req.path;
 
@@ -320,7 +350,7 @@ var route = function(req, res, next) {
     route = toACLDefinition(route).replace(/\/$/, '') || '/';
 
     // check permissions
-    return acl.isAllowed(id, route, req.method.toLowerCase(), function(err, allow) {
+    return nodeAcl.isAllowed(guestUser.id, route, req.method.toLowerCase(), function (err, allow) {
 
         if (err) {
             // Oh no! An error.
@@ -330,25 +360,25 @@ var route = function(req, res, next) {
         if (allow) {
             // Woohoo, access granted. Invoke next() 
             return next();
-        } 
-        
+        }
+
         // Check again with the raw path
-        return acl.isAllowed(id, req.path,req.method.toLowerCase(), function(err, allow) {
-        	if (err) {
-	            // Oh no! An error.
-	            return res.send(500, 'Unexpected authorization error');
-	        }
-	
-	        if (allow) {
-	            // Woohoo, access granted. Invoke next() 
-	            return next();
-	        } 
-	        
-	        // not allowed, sorry
-        	return res.send(403);
+        return nodeAcl.isAllowed(id, req.path, req.method.toLowerCase(), function (err, allow) {
+            if (err) {
+                // Oh no! An error.
+                return res.send(500, 'Unexpected authorization error');
+            }
+
+            if (allow) {
+                // Woohoo, access granted. Invoke next() 
+                return next();
+            }
+
+            // not allowed, sorry
+            return res.send(403);
         });
 
-        
+
     });
 };
 
@@ -360,11 +390,11 @@ app.post('/books', route, BooksCtrl.create);
 app.put('/books', route, BooksCtrl.update);
 app.delete('/books', route, BooksCtrl.delete);
 
-app.get('/users', route, UserCtrl.list);
-app.get('/users/:id', route, UserCtrl.read);
-app.post('/users', route, UserCtrl.create);
-app.put('/users', route, UserCtrl.update);
-app.delete('/users', route, UserCtrl.delete);
+app.get('/users', route, UsersCtrl.list);
+app.get('/users/:id', route, UsersCtrl.read);
+app.post('/users', route, UsersCtrl.create);
+app.put('/users', route, UsersCtrl.update);
+app.delete('/users', route, UsersCtrl.delete);
 
 
 
@@ -373,25 +403,22 @@ app.delete('/users', route, UserCtrl.delete);
  * ACL
  */
 
-var nodeAcl = new acl(new acl.mongodbBackend(mongoose.connection.db));
 
-app.use(nodeAcl.middleware);
 
 //nodeAcl.allow('guest', ['books'], ['get', 'post']); // throws error
 //nodeAcl.allow('admin', ['books', 'users'], '*'); // throws error
-
 
 /*
  * ------------------------------------------------
  * Create Server
  */
 
-http.createServer(app).listen(app.get("port"), function() {
+http.createServer(app).listen(app.get("port"), function () {
     console.log("Express server listening on port " + app.get("port"));
     console.log("Node Environment: " + app.get("env"));
 });
 
-process.on("SIGINT", function() {
+process.on("SIGINT", function () {
     console.warn("Express server listening on port " + app.get("port") + " exiting");
     process.exit(0);
 });
