@@ -15,7 +15,6 @@
 		"cookie-parser": "^1.4.5",
 		"errorhandler": "^1.5.1",
 		"express": "^4.17.1",
-		"express-logger": "^0.0.3",
 		"express-session": "^1.17.1",
 		"express-static": "^1.2.6",
 		"lodash": "^4.17.21",
